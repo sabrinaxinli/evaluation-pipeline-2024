@@ -1,6 +1,6 @@
 group: historical_mp
 task: historical_minimal_pairs
-dataset_path: sabrinaxinli/historical_minimal_pairs
+dataset_path: sabrinaxinli/historical-minimal-pairs
 
 validation_split: test
 test_split: test
