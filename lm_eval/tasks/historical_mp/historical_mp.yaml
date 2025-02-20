@@ -1,0 +1,24 @@
+group: historical_mp
+task: historical_minimal_pairs
+dataset_path: sabrinaxinli/historical_minimal_pairs
+
+validation_split: test
+test_split: test
+
+output_type: multiple_choice
+
+doc_to_text: ""
+doc_to_target: 0
+doc_to_choice: "{{[sent_1, sent_2]}}"
+num_fewshot: 0
+
+should_decontaminate: true
+doc_to_decontamination_query: "{{sent_1}} {{sent_2}}"
+
+metadata:
+  version: 0
+
+# metric_list:
+#   - metric: acc
+# metadata:
+#   version: 1.0
