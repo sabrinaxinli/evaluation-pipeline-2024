@@ -1,0 +1,19 @@
+group: historical_cloze
+task: historical_cloze
+
+dataset_path: sabrinaxinli/historical_cloze
+validation_split: test
+test_split: test
+
+output_type: loglikelihood
+
+doc_to_text: "{{text.split(' ')[:-1]|join(' ')}}"
+doc_to_target: "{{' '+text.split(' ')[-1]}}"
+
+metric_list:
+  - metric: perplexity
+    aggregation: perplexity
+    higher_is_better: false
+
+metadata:
+  version: 0
