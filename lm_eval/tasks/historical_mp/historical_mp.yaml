@@ -1,3 +1,4 @@
+group: historical_mp_task
 task: historical_mp
 dataset_path: sabrinaxinli/historical-minimal-pairs
 

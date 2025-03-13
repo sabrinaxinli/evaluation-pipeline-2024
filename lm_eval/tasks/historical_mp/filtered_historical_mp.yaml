@@ -1,5 +1,5 @@
-group: historical_mp
-task: historical_minimal_pairs
+group: historical_mp_task
+task: filtered_historical_mp
 dataset_path: sabrinaxinli/historical_minimal_pairs
 
 validation_split: test
