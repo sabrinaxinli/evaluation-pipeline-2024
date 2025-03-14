@@ -1,4 +1,4 @@
-group: historical_cloze
+group: historical_cloze_task
 task: historical_cloze
 
 dataset_path: sabrinaxinli/historical_cloze
