@@ -1,7 +1,7 @@
 group: historical_cloze_task
 task: historical_cloze
 
-dataset_path: sabrinaxinli/historical_cloze
+dataset_path: Hplm/historical-cloze
 validation_split: test
 test_split: test
 
