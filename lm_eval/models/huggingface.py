@@ -926,7 +926,12 @@ class HFLM(TemplateLM):
         stopping_criteria = stop_sequences_criteria(
             self.tokenizer, stop, context.shape[1], context.shape[0]
         )
-        return self.model.generate(
+        if "logits_processor" in generation_kwargs:
+            for i, processor in enumerate(generation_kwargs["logits_processor"]):
+                logit_processor = processor(tokenizer=self.tokenizer, model=self.model, device=self.device)
+                generation_kwargs["logits_processor"][i] = logit_processor
+
+        result =  self.model.generate(
             input_ids=context,
             max_length=max_length,
             stopping_criteria=stopping_criteria,
@@ -934,6 +939,8 @@ class HFLM(TemplateLM):
             use_cache=True,
             **generation_kwargs,
         )
+
+        return result
 
     def _select_cont_toks(
         self, logits: torch.Tensor, contlen: int = None, inplen: int = None
@@ -1394,8 +1401,13 @@ class HFLM(TemplateLM):
                 **kwargs,
             )
 
-            cont_toks_list = cont.tolist()
-            for cont_toks, context in zip(cont_toks_list, contexts):
+            print("done")
+
+            cont_toks_list = cont['sequences'].tolist()
+            for index, context in enumerate(contexts * len(cont_toks_list)):
+                cont_item = {key: cont[key][index] for key in ["sequences", "sequences_scores"]}
+                cont_toks = cont_item["sequences"]
+
                 # discard context + left-padding toks if using causal decoder-only LM
                 if self.AUTO_MODEL_CLASS == transformers.AutoModelForCausalLM:
                     cont_toks = cont_toks[context_enc.shape[1] :]
@@ -1408,13 +1420,15 @@ class HFLM(TemplateLM):
                         # ignore '' separator,
                         # for seq2seq case where self.tok_decode(self.eot_token_id) = ''
                         s = s.split(term)[0]
-
-                res.append(s)
+                res.append((s, cont_item["sequences_scores"].item()))
 
                 self.cache_hook.add_partial("generate_until", (context, gen_kwargs), s)
                 pbar.update(1)
         # reorder this group of results back to original unsorted form
-        res = re_ords.get_original(res)
+        if "num_beams" in kwargs:
+            res = re_ords.get_original(res, kwargs["num_beams"])
+        else:
+            res = re_ords.get_original(res)
 
         pbar.close()
 

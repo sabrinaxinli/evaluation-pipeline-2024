@@ -1,0 +1,2 @@
+task: cloze_task_topk
+class: !function task.ClozeTaskTopK

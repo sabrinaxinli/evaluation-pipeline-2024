@@ -5,8 +5,8 @@ MODEL_BASENAME=$(basename $MODEL_PATH)
 
 python -m lm_eval --model hf \
     --model_args pretrained=$MODEL_PATH,backend="causal" \
-    --tasks blimp_filtered,blimp_supplement \
-    --device cuda:0 \
+    --tasks cloze_task_topk \
+    --device cuda:1 \
     --batch_size 1 \
     --log_samples \
     --output_path results/blimp/${MODEL_BASENAME}/blimp_results.json

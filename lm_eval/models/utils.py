@@ -509,7 +509,10 @@ class Collator:
             self._reorder_indices.extend([x[0] for x in arr])
         yield from [x[1] for x in arr]
 
-    def get_original(self, newarr: List) -> List:
+
+    # this is the collator, where they reorder the results, since we use beam search multiple results may be generated per input
+    # so I added count_per_input
+    def get_original(self, newarr: List, count_per_input= 1) -> List:
         """
         Restores the original order of elements from the reordered list.
 
@@ -519,11 +522,15 @@ class Collator:
         Returns:
         list: The array with elements restored to their original order.
         """
-        res = [None] * self._size
+        res = [list() for i in range(self._size)]
         cov = [False] * self._size
 
-        for ind, v in zip(self._reorder_indices, newarr):
-            res[ind] = v
+        new_reorder_indices = []
+        for i in self._reorder_indices:
+            new_reorder_indices.extend([i] * count_per_input)
+
+        for ind, v in zip(new_reorder_indices, newarr):
+            res[ind].append(v)
             cov[ind] = True
 
         assert all(cov)
