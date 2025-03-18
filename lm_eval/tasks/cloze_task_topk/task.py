@@ -112,7 +112,7 @@ class ClozeTaskTopK(ConfigurableTask):
     
     def test_docs(self):
         random.seed(42)
-        return self.dataset["test"].select(random.sample(range(len(self.dataset["test"])), 1000))
+        return self.dataset["test"]
 
     def doc_to_text(self, doc):
         text = doc["text"]
