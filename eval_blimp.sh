@@ -7,7 +7,7 @@ python -m lm_eval --model hf \
     --model_args pretrained=$MODEL_PATH,backend="causal" \
     --tasks cloze_task_topk \
     --device cuda:1 \
-    --batch_size 1 \
+    --batch_size auto \
     --log_samples \
     --output_path results/blimp/${MODEL_BASENAME}/blimp_results.json
 

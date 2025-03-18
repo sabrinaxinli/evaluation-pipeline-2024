@@ -766,7 +766,7 @@ class HFLM(TemplateLM):
 
     def _detect_batch_size(self, requests=None, pos: int = 0):
         if requests:
-            _, context_enc, continuation_enc = requests[pos]
+            _, context_enc, continuation_enc, _, _ = requests[pos]
             max_length = len(
                 (context_enc + continuation_enc)[-(self.max_length + 1) :][:-1]
             )
@@ -1303,6 +1303,9 @@ class HFLM(TemplateLM):
             toks = self.tok_encode(req[0])
             return -len(toks), req[0]
 
+        beam_number = 1
+        if "num_beams" in requests[0].arguments[1]:
+            beam_number = requests[0].arguments[1]["num_beams"]
         pbar = tqdm(
             total=len(requests),
             disable=(disable_tqdm or (self.rank != 0)),
@@ -1401,28 +1404,29 @@ class HFLM(TemplateLM):
                 **kwargs,
             )
 
-            print("done")
 
             cont_toks_list = cont['sequences'].tolist()
-            for index, context in enumerate(contexts * len(cont_toks_list)):
-                cont_item = {key: cont[key][index] for key in ["sequences", "sequences_scores"]}
-                cont_toks = cont_item["sequences"]
+            for index, context in enumerate(contexts):
+                for i in range(len(cont_toks_list)):
+                    new_index = (index * beam_number) + i
+                    cont_item = {key: cont[key][new_index] for key in ["sequences", "sequences_scores"]}
+                    cont_toks = cont_item["sequences"]
 
-                # discard context + left-padding toks if using causal decoder-only LM
-                if self.AUTO_MODEL_CLASS == transformers.AutoModelForCausalLM:
-                    cont_toks = cont_toks[context_enc.shape[1] :]
+                    # discard context + left-padding toks if using causal decoder-only LM
+                    if self.AUTO_MODEL_CLASS == transformers.AutoModelForCausalLM:
+                        cont_toks = cont_toks[context_enc.shape[1] :]
 
-                s = self.tok_decode(cont_toks)
+                    s = self.tok_decode(cont_toks)
 
-                # use secondary stop seqs to cut off should-have-been-stopped content post-hoc
-                for term in until:
-                    if len(term) > 0:
-                        # ignore '' separator,
-                        # for seq2seq case where self.tok_decode(self.eot_token_id) = ''
-                        s = s.split(term)[0]
-                res.append((s, cont_item["sequences_scores"].item()))
+                    # use secondary stop seqs to cut off should-have-been-stopped content post-hoc
+                    for term in until:
+                        if len(term) > 0:
+                            # ignore '' separator,
+                            # for seq2seq case where self.tok_decode(self.eot_token_id) = ''
+                            s = s.split(term)[0]
+                    res.append((s, cont_item["sequences_scores"].item()))
 
-                self.cache_hook.add_partial("generate_until", (context, gen_kwargs), s)
+                    self.cache_hook.add_partial("generate_until", (context, gen_kwargs), s)
                 pbar.update(1)
         # reorder this group of results back to original unsorted form
         if "num_beams" in kwargs:

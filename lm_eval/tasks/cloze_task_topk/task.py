@@ -21,10 +21,40 @@ from packaging import version
 
 from lm_eval.api.instance import Instance
 from lm_eval.api.task import ConfigurableTask
+from lm_eval.api.registry import get_metric_aggregation
 
 from transformers import LogitsProcessor
 import torch
 from functools import partial
+import random
+import numpy as np
+
+
+def get_rank(word, results):
+            for i, result in enumerate(results):
+                if word == result[0]:
+                    return i
+            return None
+
+def reciprocal_rank(rank):
+    if rank is None:
+        return 0
+    return 1 / (rank + 1)
+
+def top_k(rank, k=5):
+    total = len(rank)
+    count = 0
+    for r in rank:
+        if r is not None and r < k:
+            count += 1
+    return count / total
+
+def count_rank(rank):
+    count = 0
+    for r in rank:
+        if r is not None:
+            count += 1
+    return count
 
 
 
@@ -58,16 +88,6 @@ class WordCountLimiterLogitsProcessor(LogitsProcessor):
             scores[i] = new_scores[i]
         return scores
 
-def _squad_metric(predictions, references):
-    squad_metric = datasets.load_metric("squad_v2")
-    return squad_metric.compute(predictions=predictions, references=references)
-
-
-def _squad_agg(key, items):
-    predictions, references = zip(*items)
-
-    return _squad_metric(predictions=predictions, references=references).get(key, 0)
-
 
 class ClozeTaskTopK(ConfigurableTask):
     VERSION = 1
@@ -75,7 +95,7 @@ class ClozeTaskTopK(ConfigurableTask):
     DATASET_NAME = None
     MAX_LENGTH = 4
     WORDS_TO_GENERATE = 1
-    BEAMS = 1000
+    BEAMS = 20
     
 
     def __init__(self):
@@ -85,16 +105,14 @@ class ClozeTaskTopK(ConfigurableTask):
         return False
 
     def has_validation_docs(self):
-        return True
+        return False
 
     def has_test_docs(self):
         return True
-
-    def validation_docs(self):
-        return self.dataset["test"].select(range(10))
     
     def test_docs(self):
-        return self.dataset["test"].select(range(10))
+        random.seed(42)
+        return self.dataset["test"].select(random.sample(range(len(self.dataset["test"])), 1000))
 
     def doc_to_text(self, doc):
         text = doc["text"]
@@ -126,10 +144,17 @@ class ClozeTaskTopK(ConfigurableTask):
             Instance(
                 request_type="generate_until",
                 doc=doc,
-                arguments=(ctx,{"logits_processor": [word_limiter], "num_beams": self.BEAMS, "num_return_sequences": self.BEAMS, "output_scores": True, "output_logits": False, "return_dict_in_generate": True, "max_new_tokens": self.MAX_LENGTH}), #"logits_processor": [word_limiter], "output_logits": True,
+                arguments=(ctx,{"logits_processor": [word_limiter], "num_beams": self.BEAMS, "num_return_sequences": self.BEAMS, "output_scores": True, "output_logits": False, "return_dict_in_generate": True, "max_gen_toks": self.MAX_LENGTH}), #"logits_processor": [word_limiter], "output_logits": True,
                 idx=0,
                 **kwargs,
             ),
+            Instance(
+                request_type="loglikelihood",
+                doc=doc,
+                arguments=(ctx, self.doc_to_target(doc)),
+                idx=0,
+                **kwargs,
+            )
         ]
 
     def process_results(self, doc, results):
@@ -143,55 +168,22 @@ class ClozeTaskTopK(ConfigurableTask):
             The results of the requests created in construct_requests.
         """
 
-        print(doc)
-        word = doc["word"]
-        word_index = None
-        for i, result in enumerate(results[0]):
-            if word in result[0]:
-                word_index = i
-                break
+        reults_top_k = results[0]
 
-        print(f"word index: {word_index}")
-
-        predictions = {
-            "predicted_tokens": results[0],
+        reults_perplexity = results[1]
+        ll, is_greedy = reults_perplexity[0]
+        
+        word = self.doc_to_target(doc)
+        rank = get_rank(word, reults_top_k)
+        result = {
+            "rank": rank,
+            "perplexity": ll,
+            "acc": int(is_greedy),
+            "reciprocal_rank": reciprocal_rank(rank),
         }
-
-        references = {
-            "answers": word,
-        }
-
-        return {
-            "rank": (
-                predictions,
-                references,
-            ),  # Exact match (the normalized answer exactly match the gold answer)
-            "f1": (
-                predictions,
-                references,
-            ),  # The F-score of predicted tokens versus the gold answer
-            "HasAns_exact": (
-                predictions,
-                references,
-            ),  # Exact match (the normalized answer exactly match the gold answer)
-            "HasAns_f1": (
-                predictions,
-                references,
-            ),  # The F-score of predicted tokens versus the gold answer
-            "NoAns_exact": (
-                predictions,
-                references,
-            ),  # Exact match (the normalized answer exactly match the gold answer)
-            "NoAns_f1": (
-                predictions,
-                references,
-            ),  # The F-score of predicted tokens versus the gold answer
-            "best_exact": (
-                predictions,
-                references,
-            ),  # Best exact match (with varying threshold)
-            "best_f1": (predictions, references),  # Best F1 (with varying threshold)
-        }
+        for interval in [1, 5, 10, 20]:
+            result[f"top_{interval}"] = 1 if rank is not None and rank < interval else 0
+        return result
 
     def aggregation(self):
         """
@@ -199,32 +191,15 @@ class ClozeTaskTopK(ConfigurableTask):
             A dictionary where keys are the names of submetrics and values are
             functions that aggregate a list of metrics
         """
-        return {
-            "exact": partial(
-                _squad_agg, "exact"
-            ),  # Exact match (the normalized answer exactly match the gold answer)
-            "f1": partial(
-                _squad_agg, "f1"
-            ),  # The F-score of predicted tokens versus the gold answer
-            "HasAns_exact": partial(
-                _squad_agg, "HasAns_exact"
-            ),  # Exact match (the normalized answer exactly match the gold answer)
-            "HasAns_f1": partial(
-                _squad_agg, "HasAns_f1"
-            ),  # The F-score of predicted tokens versus the gold answer
-            "NoAns_exact": partial(
-                _squad_agg, "NoAns_exact"
-            ),  # Exact match (the normalized answer exactly match the gold answer)
-            "NoAns_f1": partial(
-                _squad_agg, "NoAns_f1"
-            ),  # The F-score of predicted tokens versus the gold answer
-            "best_exact": partial(
-                _squad_agg, "best_exact"
-            ),  # Best exact match (with varying threshold)
-            "best_f1": partial(
-                _squad_agg, "best_f1"
-            ),  # Best F1 (with varying threshold)
+        result = {
+            "rank" : count_rank,
+            "perplexity": np.mean,#get_metric_aggregation("perplexity"),
+            "acc": get_metric_aggregation("acc"),
+            "reciprocal_rank": np.mean,
         }
+        for interval in [1, 5, 10, 20]:
+            result[f"top_{interval}"] = np.mean
+        return result
 
     def higher_is_better(self):
         """
@@ -233,12 +208,5 @@ class ClozeTaskTopK(ConfigurableTask):
             whether a higher value of the submetric is better
         """
         return {
-            "exact": True,  # Exact match (the normalized answer exactly match the gold answer)
-            "f1": True,  # The F-score of predicted tokens versus the gold answer
-            "HasAns_exact": True,  # Exact match (the normalized answer exactly match the gold answer)
-            "HasAns_f1": True,  # The F-score of predicted tokens versus the gold answer
-            "NoAns_exact": True,  # Exact match (the normalized answer exactly match the gold answer)
-            "NoAns_f1": True,  # The F-score of predicted tokens versus the gold answer
-            "best_exact": True,  # Best exact match (with varying threshold)
-            "best_f1": True,  # Best F1 (with varying threshold)
+            "rank": True,
         }
