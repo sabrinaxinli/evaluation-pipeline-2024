@@ -530,7 +530,10 @@ class Collator:
             new_reorder_indices.extend([i] * count_per_input)
 
         for ind, v in zip(new_reorder_indices, newarr):
-            res[ind].append(v)
+            if count_per_input > 1:
+                res[ind].append(v)
+            else:
+                res[ind] = v
             cov[ind] = True
 
         assert all(cov)
