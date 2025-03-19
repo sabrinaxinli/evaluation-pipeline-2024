@@ -31,10 +31,11 @@ import numpy as np
 
 
 def get_rank(word, results):
-            for i, result in enumerate(results):
-                if word == result[0]:
-                    return i
-            return None
+    word = word.lower()
+    for i, result in enumerate(results):
+        if word == result[0].lower():
+            return i
+    return None
 
 def reciprocal_rank(rank):
     if rank is None:
@@ -67,7 +68,9 @@ class WordCountLimiterLogitsProcessor(LogitsProcessor):
         disallowed_ids = set()
         for token_id in tokenizer.get_vocab().values():
             token_text = tokenizer.decode([token_id])
-            if token_text.startswith(" ") or token_text in {" ", "-", ",", ".", "!", "?", ";", ":", "\"", "\n", "\r", "\t"}:
+            if token_text.startswith(" ") or not token_text.strip().isalpha():
+                if token_text in tokenizer.special_tokens_map.values():
+                    continue
                 disallowed_ids.add(token_id)
         self.disallowed_ids = list(disallowed_ids)
 
@@ -91,11 +94,12 @@ class WordCountLimiterLogitsProcessor(LogitsProcessor):
 
 class ClozeTaskTopK(ConfigurableTask):
     VERSION = 1
-    DATASET_PATH = "Hplm/historical-cloze"
+    DATASET_PATH = "Hplm/historical-cloze-max-filtered"
     DATASET_NAME = None
     MAX_LENGTH = 4
     WORDS_TO_GENERATE = 1
-    BEAMS = 20
+    BEAMS = 50
+    TOPK_INTERVALS = [1, 5, 10, 20, 50]
     
 
     def __init__(self):
@@ -111,9 +115,9 @@ class ClozeTaskTopK(ConfigurableTask):
         return True
     
     def test_docs(self):
-        random.seed(42)
-        return self.dataset["test"]
-
+        #random.seed(42)
+        return self.dataset["test"] #.select(random.sample(range(len(self.dataset["test"])), 50))
+    
     def doc_to_text(self, doc):
         text = doc["text"]
         return " ".join(text.split(' ')[:-1])
@@ -144,7 +148,7 @@ class ClozeTaskTopK(ConfigurableTask):
             Instance(
                 request_type="generate_until",
                 doc=doc,
-                arguments=(ctx,{"logits_processor": [word_limiter], "num_beams": self.BEAMS, "num_return_sequences": self.BEAMS, "output_scores": True, "output_logits": False, "return_dict_in_generate": True, "max_gen_toks": self.MAX_LENGTH}), #"logits_processor": [word_limiter], "output_logits": True,
+                arguments=(ctx,{"logits_processor": [word_limiter], "num_beams": self.BEAMS, "num_return_sequences": self.BEAMS, "output_scores": True, "output_logits": False, "return_dict_in_generate": True, "max_gen_toks": self.MAX_LENGTH, "length_penalty": 1}), #"logits_processor": [word_limiter], "output_logits": True,
                 idx=0,
                 **kwargs,
             ),
@@ -181,7 +185,7 @@ class ClozeTaskTopK(ConfigurableTask):
             "acc": int(is_greedy),
             "reciprocal_rank": reciprocal_rank(rank),
         }
-        for interval in [1, 5, 10, 20]:
+        for interval in self.TOPK_INTERVALS:
             result[f"top_{interval}"] = 1 if rank is not None and rank < interval else 0
         return result
 
@@ -197,7 +201,7 @@ class ClozeTaskTopK(ConfigurableTask):
             "acc": get_metric_aggregation("acc"),
             "reciprocal_rank": np.mean,
         }
-        for interval in [1, 5, 10, 20]:
+        for interval in self.TOPK_INTERVALS:
             result[f"top_{interval}"] = np.mean
         return result
 
