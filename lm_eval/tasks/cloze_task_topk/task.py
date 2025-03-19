@@ -63,7 +63,7 @@ class WordCountLimiterLogitsProcessor(LogitsProcessor):
     def __init__(self, tokenizer, desired_word_count, input_text, model=None, device=None):
         self.tokenizer = tokenizer
         self.desired_word_count = desired_word_count
-        self.prompt_length = tokenizer.encode(input_text, return_tensors="pt").shape[1]
+        self.prompt_length = tokenizer.encode(input_text, return_tensors="pt", add_special_tokens=False).shape[1]
 
         disallowed_ids = set()
         for token_id in tokenizer.get_vocab().values():
@@ -77,10 +77,10 @@ class WordCountLimiterLogitsProcessor(LogitsProcessor):
     def __call__(self, input_ids, scores):
         probs = torch.softmax(scores, dim=-1)
         new_probs = probs.clone()
-
         for i, input in enumerate(input_ids):
             text = self.tokenizer.decode(input[self.prompt_length:], skip_special_tokens=True)
             word_count = len(text.split())
+            print(f"total_text: {self.tokenizer.decode(input, skip_special_tokens=False)} text: {text}, word_count: {word_count}")
             if not word_count == self.desired_word_count:
                 continue
             disallowed_mass = probs[i, self.disallowed_ids].sum()
@@ -116,7 +116,7 @@ class ClozeTaskTopK(ConfigurableTask):
     
     def test_docs(self):
         #random.seed(42)
-        return self.dataset["test"] #.select(random.sample(range(len(self.dataset["test"])), 50))
+        return self.dataset["test"].select(random.sample(range(len(self.dataset["test"])), 2))
     
     def doc_to_text(self, doc):
         text = doc["text"]
@@ -148,7 +148,7 @@ class ClozeTaskTopK(ConfigurableTask):
             Instance(
                 request_type="generate_until",
                 doc=doc,
-                arguments=(ctx,{"logits_processor": [word_limiter], "num_beams": self.BEAMS, "num_return_sequences": self.BEAMS, "output_scores": True, "output_logits": False, "return_dict_in_generate": True, "max_gen_toks": self.MAX_LENGTH, "length_penalty": 1}), #"logits_processor": [word_limiter], "output_logits": True,
+                arguments=(ctx,{"logits_processor": [word_limiter], "num_beams": self.BEAMS, "num_return_sequences": self.BEAMS, "output_scores": True, "output_logits": False, "return_dict_in_generate": True, "max_gen_toks": self.MAX_LENGTH, "length_penalty": 0}), #"logits_processor": [word_limiter], "output_logits": True,
                 idx=0,
                 **kwargs,
             ),
