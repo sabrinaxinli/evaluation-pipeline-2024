@@ -28,6 +28,7 @@ import torch
 from functools import partial
 import random
 import numpy as np
+import json
 
 
 def get_rank(word, results):
@@ -60,28 +61,26 @@ def count_rank(rank):
 
 
 class WordCountLimiterLogitsProcessor(LogitsProcessor):
-    def __init__(self, tokenizer, desired_word_count, input_text, model=None, device=None):
+    def __init__(self, tokenizer, input_text, disallowed = {}, model=None, device=None):    
+        
+        name_or_path = tokenizer.name_or_path
+        if "dora" in name_or_path:
+            name_or_path = "llama"
+        if "8B" in name_or_path:
+            name_or_path = "llama"
+        
+        disallowed_list = disallowed.dictionary[name_or_path]
+        self.disallowed_ids = torch.tensor(disallowed_list, device = device)
+        
         self.tokenizer = tokenizer
-        self.desired_word_count = desired_word_count
         self.prompt_length = tokenizer.encode(input_text, return_tensors="pt", add_special_tokens=False).shape[1]
-
-        disallowed_ids = set()
-        for token_id in tokenizer.get_vocab().values():
-            token_text = tokenizer.decode([token_id])
-            if token_text.startswith(" ") or not token_text.strip().isalpha():
-                if token_text in tokenizer.special_tokens_map.values():
-                    continue
-                disallowed_ids.add(token_id)
-        self.disallowed_ids = list(disallowed_ids)
 
     def __call__(self, input_ids, scores):
         probs = torch.softmax(scores, dim=-1)
         new_probs = probs.clone()
+
         for i, input in enumerate(input_ids):
-            text = self.tokenizer.decode(input[self.prompt_length:], skip_special_tokens=True)
-            word_count = len(text.split())
-            print(f"total_text: {self.tokenizer.decode(input, skip_special_tokens=False)} text: {text}, word_count: {word_count}")
-            if not word_count == self.desired_word_count:
+            if input.shape[0] <= self.prompt_length:
                 continue
             disallowed_mass = probs[i, self.disallowed_ids].sum()
             
@@ -98,12 +97,23 @@ class ClozeTaskTopK(ConfigurableTask):
     DATASET_NAME = None
     MAX_LENGTH = 4
     WORDS_TO_GENERATE = 1
-    BEAMS = 50
-    TOPK_INTERVALS = [1, 5, 10, 20, 50]
+    BEAMS = 100
+    TOPK_INTERVALS = [1, 5, 10, 20, 50, 100]
     
 
     def __init__(self):
         super().__init__(config={"metadata": {"version": self.VERSION}})
+        with open("lm_eval/tasks/cloze_task_topk/disallowed_ids.json", "r") as input_file:
+            self.disallowed = json.load(input_file)
+        class dictionary_wrapper():
+            def __init__(self, dictionary):
+                    self.dictionary = dictionary
+            def __str__(self):
+                    return "long_dict"
+            def __repr__(self):
+                    return "long_dict"
+            
+        self.disallowed = dictionary_wrapper(self.disallowed)
 
     def has_training_docs(self):
         return False
@@ -116,7 +126,7 @@ class ClozeTaskTopK(ConfigurableTask):
     
     def test_docs(self):
         #random.seed(42)
-        return self.dataset["test"].select(random.sample(range(len(self.dataset["test"])), 2))
+        return self.dataset["test"] #.select(random.sample(range(len(self.dataset["test"])), 2))
     
     def doc_to_text(self, doc):
         text = doc["text"]
@@ -143,7 +153,7 @@ class ClozeTaskTopK(ConfigurableTask):
             language description, as well as the few shot examples, and the question
             part of the document for `doc`.
         """
-        word_limiter = partial(WordCountLimiterLogitsProcessor, desired_word_count=self.WORDS_TO_GENERATE, input_text=ctx)
+        word_limiter = partial(WordCountLimiterLogitsProcessor, disallowed=self.disallowed, input_text=ctx)
         return [
             Instance(
                 request_type="generate_until",
