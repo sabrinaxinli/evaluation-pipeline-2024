@@ -75,7 +75,7 @@ class WordCountLimiterLogitsProcessor(LogitsProcessor):
         self.tokenizer = tokenizer
         self.prompt_length = tokenizer.encode(input_text, return_tensors="pt", add_special_tokens=False).shape[1]
 
-    def __call__(self, input_ids, scores):
+    """def __call__(self, input_ids, scores):
         probs = torch.softmax(scores, dim=-1)
         new_probs = probs.clone()
 
@@ -88,7 +88,21 @@ class WordCountLimiterLogitsProcessor(LogitsProcessor):
             new_probs[i, self.tokenizer.eos_token_id] += disallowed_mass
             new_scores = torch.log(new_probs) + torch.log(torch.exp(scores).sum(dim=-1, keepdim=True))
             scores[i] = new_scores[i]
+        return scores"""
+    
+    def __call__(self, input_ids, scores):
+        probs = torch.softmax(scores, dim=-1)
+
+        if input_ids.shape[1] <= self.prompt_length:
+            return scores
+        
+        disallowed_mass = probs[:, self.disallowed_ids].sum(dim=-1)
+        probs[:, self.disallowed_ids] = 0
+        probs[:, self.tokenizer.eos_token_id] += disallowed_mass
+        new_scores = torch.log(probs) + torch.log(torch.exp(scores).sum(dim=-1, keepdim=True))
+        scores = new_scores
         return scores
+
 
 
 class ClozeTaskTopK(ConfigurableTask):
@@ -125,8 +139,8 @@ class ClozeTaskTopK(ConfigurableTask):
         return True
     
     def test_docs(self):
-        #random.seed(42)
-        return self.dataset["test"] #.select(random.sample(range(len(self.dataset["test"])), 2))
+        random.seed(42)
+        return self.dataset["test"].select(random.sample(range(len(self.dataset["test"])), 10))
     
     def doc_to_text(self, doc):
         text = doc["text"]
@@ -185,7 +199,7 @@ class ClozeTaskTopK(ConfigurableTask):
         reults_top_k = results[0]
 
         reults_perplexity = results[1]
-        ll, is_greedy = reults_perplexity[0]
+        ll, is_greedy = reults_perplexity
         
         word = self.doc_to_target(doc)
         rank = get_rank(word, reults_top_k)
