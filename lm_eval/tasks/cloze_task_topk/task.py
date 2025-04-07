@@ -1,18 +1,3 @@
-"""
-Know What You Don’t Know: Unanswerable Questions for SQuAD
-https://arxiv.org/pdf/1806.03822.pdf
-
-Stanford Question Answering Dataset (SQuAD) is a reading comprehension dataset,
-consisting of questions posed by crowdworkers on a set of Wikipedia articles,
-where the answer to every question is a segment of text, or span, from the
-corresponding reading passage, or the question might be unanswerable.
-SQuAD2.0 combines the 100,000 questions in SQuAD1.1 with over 50,000 unanswerable
-questions written adversarially by crowdworkers to look similar to answerable ones.
-To do well on SQuAD2.0, systems must not only answer questions when possible, but
-also determine when no answer is supported by the paragraph and abstain from answering.
-
-Homepage: https://rajpurkar.github.io/SQuAD-explorer/
-"""
 from functools import partial
 from math import exp
 
@@ -61,34 +46,12 @@ def count_rank(rank):
 
 
 class WordCountLimiterLogitsProcessor(LogitsProcessor):
-    def __init__(self, tokenizer, input_text, disallowed = {}, model=None, device=None):    
-        
-        name_or_path = tokenizer.name_or_path
-        if "dora" in name_or_path:
-            name_or_path = "llama"
-        if "8B" in name_or_path:
-            name_or_path = "llama"
-        
-        disallowed_list = disallowed.dictionary[name_or_path]
+    def __init__(self, tokenizer, input_text, disallowed_list, model=None, device=None):    
         self.disallowed_ids = torch.tensor(disallowed_list, device = device)
         
         self.tokenizer = tokenizer
         self.prompt_length = tokenizer.encode(input_text, return_tensors="pt", add_special_tokens=False).shape[1]
 
-    """def __call__(self, input_ids, scores):
-        probs = torch.softmax(scores, dim=-1)
-        new_probs = probs.clone()
-
-        for i, input in enumerate(input_ids):
-            if input.shape[0] <= self.prompt_length:
-                continue
-            disallowed_mass = probs[i, self.disallowed_ids].sum()
-            
-            new_probs[i, self.disallowed_ids] = 0
-            new_probs[i, self.tokenizer.eos_token_id] += disallowed_mass
-            new_scores = torch.log(new_probs) + torch.log(torch.exp(scores).sum(dim=-1, keepdim=True))
-            scores[i] = new_scores[i]
-        return scores"""
     
     def __call__(self, input_ids, scores):
         probs = torch.softmax(scores, dim=-1)
@@ -117,17 +80,6 @@ class ClozeTaskTopK(ConfigurableTask):
 
     def __init__(self):
         super().__init__(config={"metadata": {"version": self.VERSION}})
-        with open("lm_eval/tasks/cloze_task_topk/disallowed_ids.json", "r") as input_file:
-            self.disallowed = json.load(input_file)
-        class dictionary_wrapper():
-            def __init__(self, dictionary):
-                    self.dictionary = dictionary
-            def __str__(self):
-                    return "long_dict"
-            def __repr__(self):
-                    return "long_dict"
-            
-        self.disallowed = dictionary_wrapper(self.disallowed)
 
     def has_training_docs(self):
         return False
@@ -167,7 +119,7 @@ class ClozeTaskTopK(ConfigurableTask):
             language description, as well as the few shot examples, and the question
             part of the document for `doc`.
         """
-        word_limiter = partial(WordCountLimiterLogitsProcessor, disallowed=self.disallowed, input_text=ctx)
+        word_limiter = partial(WordCountLimiterLogitsProcessor, input_text=ctx)
         return [
             Instance(
                 request_type="generate_until",

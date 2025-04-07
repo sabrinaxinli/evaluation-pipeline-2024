@@ -319,6 +319,16 @@ class HFLM(TemplateLM):
             else:
                 self.tokenizer.add_special_tokens({"pad_token": "<|pad|>"})
 
+        def determine_disallowed_ids(tokenizer):
+            disallowed_ids = set()
+            for token_id in tokenizer.get_vocab().values():
+                token_text = tokenizer.decode([token_id])
+                if token_text.startswith(" ") or not token_text.strip().isalpha():
+                    if token_text in tokenizer.special_tokens_map.values():
+                        continue
+                    disallowed_ids.add(token_id)
+            return list(disallowed_ids)
+        self.disallowed = determine_disallowed_ids(self.tokenizer)
         # TODO: override this for Gemma
         self.add_bos_token = add_bos_token
         if getattr(self.config, "model_type", None) == "gemma":
@@ -928,7 +938,7 @@ class HFLM(TemplateLM):
         )
         if "logits_processor" in generation_kwargs:
             for i, processor in enumerate(generation_kwargs["logits_processor"]):
-                logit_processor = processor(tokenizer=self.tokenizer, model=self.model, device=self.device)
+                logit_processor = processor(tokenizer=self.tokenizer, model=self.model, device=self.device, disallowed_list=self.disallowed)
                 generation_kwargs["logits_processor"][i] = logit_processor
 
         result =  self.model.generate(
